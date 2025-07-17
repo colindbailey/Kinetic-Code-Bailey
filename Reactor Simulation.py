@@ -1,9 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+import os
+os.environ["OMP_NUM_THREADS"] = "10"       # for MKL/OpenBLAS
+os.environ["OPENBLAS_NUM_THREADS"] = "10"
+
 # Constants
 R = 8.314  # Universal gas constant, J/(mol·K)
-T = 80 + 273.15  # Temperature, K
+T = 84 + 273.15  # Temperature, K
 
 # Updated Arrhenius parameters with provided optimized values from kinetic model_V23
 arrhenius_params = {
@@ -45,13 +49,13 @@ reactor_volume = 30e-6  # Reactor volume in m³ (30 mL)
 D_tube = 0.0016  # Tube diameter in meters (1.6 mm)
 Ac = np.pi * (D_tube / 2)**2  # Cross-sectional area in m²
 length = reactor_volume / Ac  # Reactor length in meters
-flow_rate_mL_min = 2.0  # Flow rate in mL/min
+flow_rate_mL_min = 1.76  # Flow rate in mL/min
 Q = flow_rate_mL_min * 1e-6 / 60  # m³/s
 u = Q / Ac  # Linear velocity in m/s
 D_axial = 1e-5  # m²/s
 
 # Spatial discretization
-N = 1000  # Number of spatial grid points
+N = 100000  # Number of spatial grid points
 dx = length / (N - 1)
 x = np.linspace(0, length, N)
 
@@ -72,8 +76,8 @@ C_X = np.zeros(N)      # X
 A_consumed = np.zeros(N)
 
 # Time-stepping parameters
-dt = 0.01  # Time step (s)
-max_iterations = 5000000
+dt = 0.0001  # Time step (s)
+max_iterations = 500000000
 steady_state_tolerance = 1e-6
 
 # Reaction rate calculation function
@@ -106,7 +110,7 @@ for iteration in range(1, max_iterations + 1):
     # Update equations for all species with consideration for mass conservation
 
     # Update X based on formation from IPA and consumption in other reactions
-    dX_formation = r_form_X * dt
+    dX_formation = r_form_X
     dX_consumed = (r_AE + r_AC + r_CF + r_FH + r_EI + r_IH) * dt
     dX = dX_formation - dX_consumed
     C_X[1:-1] += dt * (-u * (C_X[1:-1] - C_X[:-2]) / dx +
@@ -115,39 +119,39 @@ for iteration in range(1, max_iterations + 1):
 
     # Update IPA concentration based on formation of X
     C_IPA[1:-1] += dt * (-u * (C_IPA[1:-1] - C_IPA[:-2]) / dx +
-                         D_axial * (C_IPA[2:] - 2 * C_IPA[1:-1] + C_IPA[:-2]) / dx**2 - r_form_X * dt)
+                         D_axial * (C_IPA[2:] - 2 * C_IPA[1:-1] + C_IPA[:-2]) / dx**2 - r_form_X)
     C_IPA[1:-1] = np.maximum(C_IPA[1:-1], 0)
 
     # Update A concentration and track how much A is consumed
-    delta_AE = r_AE * dt
-    delta_AC = r_AC * dt
+    delta_AE = r_AE
+    delta_AC = r_AC
     C_A[1:-1] += dt * (-u * (C_A[1:-1] - C_A[:-2]) / dx +
                        D_axial * (C_A[2:] - 2 * C_A[1:-1] + C_A[:-2]) / dx**2 - delta_AE - delta_AC)
     A_consumed[1:-1] += delta_AE + delta_AC
 
     # Ensure that product formation is limited by the amount of A consumed
     C_C[1:-1] += dt * (-u * (C_C[1:-1] - C_C[:-2]) / dx +
-                       D_axial * (C_C[2:] - 2 * C_C[1:-1] + C_C[:-2]) / dx**2 + delta_AC - r_CF * dt - r_CB * dt)
+                       D_axial * (C_C[2:] - 2 * C_C[1:-1] + C_C[:-2]) / dx**2 + delta_AC - r_CF - r_CB)
     C_C[1:-1] = np.minimum(C_C[1:-1], A_consumed[1:-1])
 
     C_E[1:-1] += dt * (-u * (C_E[1:-1] - C_E[:-2]) / dx +
-                       D_axial * (C_E[2:] - 2 * C_E[1:-1] + C_E[:-2]) / dx**2 + delta_AE - r_EI * dt)
+                       D_axial * (C_E[2:] - 2 * C_E[1:-1] + C_E[:-2]) / dx**2 + delta_AE - r_EI)
     C_E[1:-1] = np.minimum(C_E[1:-1], A_consumed[1:-1])
 
     C_F[1:-1] += dt * (-u * (C_F[1:-1] - C_F[:-2]) / dx +
-                       D_axial * (C_F[2:] - 2 * C_F[1:-1] + C_F[:-2]) / dx**2 + r_CF * dt - r_FH * dt + r_HF * dt)
+                       D_axial * (C_F[2:] - 2 * C_F[1:-1] + C_F[:-2]) / dx**2 + r_CF - r_FH + r_HF)
     C_F[1:-1] = np.minimum(C_F[1:-1], A_consumed[1:-1])
 
     C_B[1:-1] += dt * (-u * (C_B[1:-1] - C_B[:-2]) / dx +
-                       D_axial * (C_B[2:] - 2 * C_B[1:-1] + C_B[:-2]) / dx**2 + r_CB * dt)
+                       D_axial * (C_B[2:] - 2 * C_B[1:-1] + C_B[:-2]) / dx**2 + r_CB)
     C_B[1:-1] = np.minimum(C_B[1:-1], A_consumed[1:-1])
 
     C_H[1:-1] += dt * (-u * (C_H[1:-1] - C_H[:-2]) / dx +
-                       D_axial * (C_H[2:] - 2 * C_H[1:-1] + C_H[:-2]) / dx**2 + r_IH * dt + r_FH * dt - r_HF * dt)
+                       D_axial * (C_H[2:] - 2 * C_H[1:-1] + C_H[:-2]) / dx**2 + r_IH + r_FH - r_HF)
     C_H[1:-1] = np.minimum(C_H[1:-1], A_consumed[1:-1])
 
     C_I[1:-1] += dt * (-u * (C_I[1:-1] - C_I[:-2]) / dx +
-                       D_axial * (C_I[2:] - 2 * C_I[1:-1] + C_I[:-2]) / dx**2 + r_EI * dt - r_IH * dt)
+                       D_axial * (C_I[2:] - 2 * C_I[1:-1] + C_I[:-2]) / dx**2 + r_EI - r_IH)
     C_I[1:-1] = np.minimum(C_I[1:-1], A_consumed[1:-1])
 
     # Apply boundary conditions
@@ -187,7 +191,8 @@ final_moles = {
     'C': C_C[-1] * reactor_volume,
     'E': C_E[-1] * reactor_volume,
     'F': C_F[-1] * reactor_volume,
-    'H': C_H[-1] * reactor_volume
+    'H': C_H[-1] * reactor_volume,
+    'I': C_I[-1] * reactor_volume
 }
 
 # Calculate and print yields
@@ -198,12 +203,12 @@ for compound, yield_value in yields.items():
 
 # Plot the final concentrations
 plt.figure(figsize=(12, 8))
-plt.plot(x, C_A, label='A')
-plt.plot(x, C_C, label='C')
-plt.plot(x, C_E, label='E')
-plt.plot(x, C_F, label='F')
-plt.plot(x, C_B, label='B')
-plt.plot(x, C_H, label='H')
+plt.plot(x, C_A, label='4HBA')
+plt.plot(x, C_C, label='Mono-Alkylated')
+plt.plot(x, C_E, label='Isopropoxy')
+plt.plot(x, C_F, label='DIPBA')
+plt.plot(x, C_B, label='Sulfonated Impurity')
+plt.plot(x, C_H, label='Esterified Impurity')
 plt.plot(x, C_I, label='I')
 plt.xlabel('Reactor Length (m)', fontsize=14)
 plt.ylabel('Concentration (mol/m³)', fontsize=14)
